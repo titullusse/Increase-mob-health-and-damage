@@ -37,6 +37,7 @@ JAR : `build/libs/mobhealthmodifier-1.0.0.jar`
 src/main/java/com/marc33/mobhealth/
 ├── MobHealthModifier.java
 ├── config/MobHealthModifierConfig.java
+├── config/MobTarget.java
 └── events/MobAttributeHandler.java
 
 src/main/resources/
@@ -52,6 +53,7 @@ src/main/resources/
 
 ```toml
 [general]
+	affectedMobs = "HOSTILE"   # ALL | HOSTILE | PASSIVE
 	enableHealthModification = true
 	healthMultiplier = 1.0     # 0.1 – 10.0
 	enableDamageModification = true
@@ -59,6 +61,8 @@ src/main/resources/
 ```
 
 Presets : facile `0.5/0.5` · normal `1.0/1.0` · difficile `2.0/2.0` · hardcore `3.0/3.0`
+
+Hostile = `mob instanceof Enemy || getType().getCategory() == MobCategory.MONSTER`
 
 ---
 
@@ -89,8 +93,14 @@ d'exception si un évènement arrive avant le chargement du fichier.
 @SubscribeEvent
 public static void onEntityJoinWorld(EntityJoinLevelEvent event)
 ```
-Applique les multiplicateurs. Garde-fous : côté client ignoré, non-`Mob` ignorés, mobs déjà traités
-ignorés via un marqueur NBT persistant.
+Applique les multiplicateurs. Garde-fous : côté client ignoré, non-`Mob` ignorés, mobs hors ciblage
+ignorés, mobs déjà traités ignorés via un marqueur NBT persistant.
+
+### MobTarget
+```java
+public enum MobTarget { ALL, HOSTILE, PASSIVE }   // abstract boolean matches(Mob)
+```
+Lu depuis le TOML avec `builder.defineEnum("affectedMobs", MobTarget.HOSTILE)`.
 
 ---
 
@@ -99,6 +109,7 @@ ignorés via un marqueur NBT persistant.
 ```
 Startup → register() → TOML généré
 Mob spawn → EntityJoinLevelEvent → applyModifications(mob)
+          → affectedMobs.matches(mob) ? sinon on sort sans marquer
           → MAX_HEALTH ×= healthMultiplier (+ setHealth(getMaxHealth()))
           → ATTACK_DAMAGE ×= damageMultiplier
 ```
@@ -121,6 +132,8 @@ import net.neoforged.fml.common.EventBusSubscriber;
 
 // Entités
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 
@@ -167,7 +180,7 @@ if (speed != null) {
 - Un mob garde à vie les valeurs reçues à son apparition
 - Redémarrage requis après édition du TOML
 - Pas de commande ni de GUI
-- Aucune distinction par type de mob
+- Ciblage par catégorie uniquement, pas par type précis de mob
 - `ATTACK_DAMAGE` absent chez les creepers et les mobs à distance
 
 ---

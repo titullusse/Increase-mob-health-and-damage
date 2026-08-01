@@ -52,6 +52,13 @@ Fichier : `config/mobhealthmodifier-common.toml` (créé au premier lancement).
 
 ```toml
 [general]
+	# Quels mobs sont affectes par les multiplicateurs.
+	# HOSTILE = zombies, squelettes, creepers, blazes, boss...
+	# PASSIVE = vaches, moutons, villageois, golems...
+	# ALL     = tous les mobs
+	# Allowed Values: ALL, HOSTILE, PASSIVE
+	affectedMobs = "HOSTILE"
+
 	# Active la modification de la sante maximale des mobs.
 	enableHealthModification = true
 
@@ -70,6 +77,25 @@ Fichier : `config/mobhealthmodifier-common.toml` (créé au premier lancement).
 ```
 
 Modifiez les valeurs, puis **redémarrez** le jeu ou le serveur.
+
+### Ciblage des mobs
+
+`affectedMobs` choisit qui reçoit les multiplicateurs :
+
+| Valeur | Effet |
+|--------|-------|
+| `HOSTILE` *(défaut)* | Uniquement les mobs hostiles |
+| `PASSIVE` | Uniquement les mobs non hostiles |
+| `ALL` | Tous les mobs |
+
+Un mob est considéré comme hostile s'il porte le marqueur vanilla `Enemy` **ou** si sa catégorie de
+spawn est `MONSTER`. Cela couvre toute la hiérarchie `Monster` (zombie, squelette, creeper, araignée,
+enderman, piglin, wither, warden…) et les hostiles qui vivent hors de cette hiérarchie (slime, ghast,
+phantom, shulker, hoglin, zoglin, ender dragon). Le second critère sert de filet pour les mobs
+ajoutés par d'autres mods, qui déclarent parfois leur hostilité par la catégorie seule.
+
+Les mobs hors ciblage ne sont pas touchés du tout : ils ne reçoivent aucun marqueur et seront
+réexaminés si vous changez `affectedMobs` plus tard.
 
 ### Presets
 
@@ -110,6 +136,7 @@ Un mob apparaît
   └─ EntityJoinLevelEvent
      └─ MobAttributeHandler.onEntityJoinWorld()
         ├─ ignore le côté client et les non-mobs
+        ├─ ignore les mobs hors ciblage (affectedMobs)
         ├─ ignore les mobs déjà traités (marqueur NBT persistant)
         ├─ MAX_HEALTH    ×= healthMultiplier, puis soin complet
         └─ ATTACK_DAMAGE ×= damageMultiplier
@@ -126,6 +153,7 @@ l'entité, ce qui garantit une modification unique par mob.
 src/main/java/com/marc33/mobhealth/
 ├── MobHealthModifier.java              # @Mod, enregistre la config
 ├── config/MobHealthModifierConfig.java # structure TOML + getters
+├── config/MobTarget.java               # ciblage ALL / HOSTILE / PASSIVE
 └── events/MobAttributeHandler.java     # applique les multiplicateurs
 
 src/main/resources/
@@ -143,7 +171,8 @@ src/main/resources/
   reçues à son apparition.
 - Pas de rechargement à chaud : un redémarrage est nécessaire après édition du TOML.
 - Pas de commande in-game ni de GUI.
-- Les multiplicateurs s'appliquent à **tous** les mobs, sans distinction de type.
+- Le ciblage se fait par catégorie (hostiles / passifs / tous), pas par type précis : impossible de
+  donner un multiplicateur différent aux zombies et aux creepers.
 - `ATTACK_DAMAGE` n'existe pas sur tous les mobs. Les creepers (explosion) et les mobs à distance
   (squelette, blaze) infligent des dégâts par un autre biais et ne sont pas affectés côté dégâts.
 
@@ -152,7 +181,7 @@ src/main/resources/
 | Symptôme | Piste |
 |----------|-------|
 | Le fichier de config n'existe pas | Il est créé au **premier** lancement ; démarrez une fois puis quittez. |
-| Les mobs ne changent pas | Vérifiez que ce sont de **nouveaux** spawns, et que les `enable*` sont à `true`. |
+| Les mobs ne changent pas | Vérifiez que ce sont de **nouveaux** spawns, que les `enable*` sont à `true`, et que `affectedMobs` couvre bien le mob testé (par défaut `HOSTILE` : une vache n'est pas affectée). |
 | Le mod n'apparaît pas dans la liste | Vérifiez la version de NeoForge (21.1.x) et que le JAR est bien dans `mods/`. |
 | Erreur de compilation Java | `java -version` doit indiquer 21 ou plus. |
 

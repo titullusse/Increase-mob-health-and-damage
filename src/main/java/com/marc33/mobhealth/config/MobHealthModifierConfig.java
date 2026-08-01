@@ -19,17 +19,29 @@ public final class MobHealthModifierConfig {
     /** Valeur la plus haute acceptee pour un multiplicateur. */
     public static final double MAX_MULTIPLIER = 10.0D;
 
+    /** Ciblage utilise tant que la configuration n'est pas chargee. */
+    public static final MobTarget DEFAULT_TARGET = MobTarget.HOSTILE;
+
     /** Structure du fichier TOML, section {@code [general]}. */
     public static final class Common {
 
+        public final ModConfigSpec.EnumValue<MobTarget> affectedMobs;
         public final ModConfigSpec.BooleanValue enableHealthModification;
         public final ModConfigSpec.DoubleValue healthMultiplier;
         public final ModConfigSpec.BooleanValue enableDamageModification;
         public final ModConfigSpec.DoubleValue damageMultiplier;
 
         Common(ModConfigSpec.Builder builder) {
-            builder.comment("Reglages globaux appliques a tous les mobs qui apparaissent.")
+            builder.comment("Reglages globaux appliques aux mobs qui apparaissent.")
                     .push("general");
+
+            affectedMobs = builder
+                    .comment(
+                            "Quels mobs sont affectes par les multiplicateurs.",
+                            "HOSTILE = zombies, squelettes, creepers, blazes, boss...",
+                            "PASSIVE = vaches, moutons, villageois, golems...",
+                            "ALL     = tous les mobs")
+                    .defineEnum("affectedMobs", DEFAULT_TARGET);
 
             enableHealthModification = builder
                     .comment("Active la modification de la sante maximale des mobs.")
@@ -84,6 +96,13 @@ public final class MobHealthModifierConfig {
      */
     public static boolean isLoaded() {
         return COMMON_SPEC.isLoaded();
+    }
+
+    /**
+     * @return le mode de ciblage choisi, jamais {@code null}
+     */
+    public static MobTarget getAffectedMobs() {
+        return isLoaded() ? COMMON.affectedMobs.get() : DEFAULT_TARGET;
     }
 
     /**

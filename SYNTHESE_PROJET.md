@@ -1,7 +1,7 @@
 # 📋 Synthèse — Mob Health Modifier
 
-Mod NeoForge 1.21.1 qui multiplie globalement la **vie** et les **dégâts** de tous les mobs via un
-fichier de configuration TOML.
+Mod NeoForge 1.21.1 qui multiplie la **vie** et les **dégâts** des mobs — hostiles par défaut,
+passifs ou tous au choix — via un fichier de configuration TOML.
 
 ---
 
@@ -17,6 +17,7 @@ Increase-mob-health-and-damage/
 ├── src/main/java/com/marc33/mobhealth/
 │   ├── MobHealthModifier.java
 │   ├── config/MobHealthModifierConfig.java
+│   ├── config/MobTarget.java
 │   └── events/MobAttributeHandler.java
 │
 └── src/main/resources/
@@ -63,7 +64,35 @@ Rôles :
 - exposer des getters qui vérifient `isLoaded()` avant de lire, afin de renvoyer une valeur neutre
   plutôt que de lever une exception si un évènement arrive avant le chargement du fichier.
 
-### 3. `MobAttributeHandler.java` — logique de jeu
+### 3. `MobTarget.java` — ciblage
+
+```java
+public enum MobTarget {
+    ALL     { public boolean matches(Mob mob) { return true; } },
+    HOSTILE { public boolean matches(Mob mob) { return isHostile(mob); } },
+    PASSIVE { public boolean matches(Mob mob) { return !isHostile(mob); } };
+
+    private static boolean isHostile(Mob mob) {
+        return mob instanceof Enemy || mob.getType().getCategory() == MobCategory.MONSTER;
+    }
+}
+```
+
+Lu depuis le TOML via `builder.defineEnum("affectedMobs", MobTarget.HOSTILE)` ; NeoForge écrit
+lui-même la liste des valeurs acceptées en commentaire et refuse toute autre valeur.
+
+Le test d'hostilité combine deux critères :
+
+- **`Enemy`** est le marqueur vanilla de l'hostilité. Il est porté par `Monster`, donc par toute la
+  hiérarchie habituelle (zombie, squelette, creeper, araignée, enderman, piglin, wither, warden…),
+  mais aussi, hors de cette hiérarchie, par `Slime`, `Ghast`, `Phantom`, `Shulker`, `Hoglin`,
+  `Zoglin` et `EnderDragon` — d'où la nécessité de tester l'interface plutôt que la classe
+  `Monster`.
+- **`MobCategory.MONSTER`** est la catégorie de spawn. Elle sert de filet de sécurité pour les mobs
+  ajoutés par d'autres mods, qui déclarent parfois leur hostilité par la catégorie sans implémenter
+  `Enemy`.
+
+### 4. `MobAttributeHandler.java` — logique de jeu
 
 ```java
 @EventBusSubscriber(modid = MobHealthModifier.MOD_ID)
@@ -76,11 +105,14 @@ public final class MobAttributeHandler {
 Le paramètre `bus` de `@EventBusSubscriber` est déprécié en 21.1 : le bus « game » est le défaut, il
 ne faut plus le préciser.
 
-Trois filtres avant modification :
+Quatre filtres avant modification :
 
 1. **Côté client ignoré** — les attributs sont autoritaires côté serveur puis synchronisés.
 2. **Non-`Mob` ignorés** — écarte les joueurs, projectiles, items au sol, etc.
-3. **Mobs déjà traités ignorés** — voir ci-dessous.
+3. **Mobs hors ciblage ignorés** — selon `affectedMobs`. Ce filtre passe **avant** l'écriture du
+   marqueur : un mob non ciblé repart totalement intact et sera réexaminé si la configuration
+   change plus tard.
+4. **Mobs déjà traités ignorés** — voir ci-dessous.
 
 ---
 
@@ -106,6 +138,7 @@ Conséquence assumée : changer la configuration n'affecte pas les mobs déjà m
 
 ```toml
 [general]
+	affectedMobs = "HOSTILE"      # ALL | HOSTILE | PASSIVE
 	enableHealthModification = true
 	healthMultiplier = 1.0        # 0.1 – 10.0
 	enableDamageModification = true
@@ -127,7 +160,7 @@ Conséquence assumée : changer la configuration n'affecte pas les mobs déjà m
 
 3. UN MOB ARRIVE DANS LE MONDE
    EntityJoinLevelEvent
-   └─ côté serveur ? instanceof Mob ? pas déjà marqué ?
+   └─ côté serveur ? instanceof Mob ? cible de affectedMobs ? pas déjà marqué ?
       └─ applyModifications(mob)
 
 4. MODIFICATION
@@ -143,7 +176,8 @@ apparaîtrait à moitié blessé.
 ## 🎮 Comportement
 
 **Fait :**
-- multiplie santé et dégâts de tous les mobs qui apparaissent ;
+- multiplie santé et dégâts des mobs qui apparaissent, hostiles par défaut ;
+- cible les hostiles, les passifs ou tous, au choix (`affectedMobs`) ;
 - chaque modificateur s'active/se désactive indépendamment ;
 - fonctionne en solo comme en serveur, sans mod côté client.
 
@@ -151,7 +185,7 @@ apparaîtrait à moitié blessé.
 - modifier les mobs déjà présents avant l'installation ;
 - appliquer une nouvelle config aux mobs existants ;
 - recharger la config à chaud, ni fournir commande ou GUI ;
-- distinguer les types de mobs.
+- distinguer les types précis de mobs : le ciblage se fait par catégorie, pas zombie par zombie.
 
 **Exemple** — `healthMultiplier = 2.0`, `damageMultiplier = 1.5` :
 
@@ -192,10 +226,10 @@ tâche `processResources`.
 | Élément | Détail |
 |---------|--------|
 | Fichiers Java | 3 |
-| Classes | 4 (Main, Config, Config.Common, Handler) |
+| Classes | 5 (Main, Config, Config.Common, MobTarget, Handler) |
 | Évènements écoutés | 1 (`EntityJoinLevelEvent`) |
 | Attributs modifiés | 2 (`MAX_HEALTH`, `ATTACK_DAMAGE`) |
-| Paramètres de config | 4 (2 booléens, 2 doubles) |
+| Paramètres de config | 5 (1 enum, 2 booléens, 2 doubles) |
 
 ---
 
@@ -220,7 +254,7 @@ recalculer.
 
 ## 🎯 Pistes d'évolution
 
-1. Multiplicateurs par type de mob (`zombieHealthMultiplier`, …)
+1. Multiplicateurs par type précis de mob (`zombieHealthMultiplier`, …)
 2. Autres attributs : vitesse, portée d'attaque, résistance au recul
 3. Commande `/mobmodify health 2.0` avec rechargement à chaud
 4. Écran de configuration in-game

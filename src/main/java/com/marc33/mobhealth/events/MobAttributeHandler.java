@@ -49,12 +49,19 @@ public final class MobAttributeHandler {
     /**
      * Multiplie la sante maximale et les degats d'attaque du mob selon la configuration.
      *
-     * <p>Un mob qui ne possede pas l'attribut vise (par exemple un creeper, qui n'a pas de degats
-     * d'attaque : il explose) est simplement ignore pour cet attribut.
+     * <p>Le mob doit d'abord correspondre au ciblage {@code affectedMobs} (hostiles, passifs ou
+     * tous). Un mob qui ne possede pas l'attribut vise (par exemple un creeper, qui n'a pas de
+     * degats d'attaque : il explose) est simplement ignore pour cet attribut.
      *
      * @param mob mob venant d'entrer dans le monde
      */
     private static void applyModifications(Mob mob) {
+        // Filtre avant le marqueur : un mob hors ciblage repart intact, sans marqueur, et sera donc
+        // reexamine s'il revient plus tard avec une configuration differente.
+        if (!MobHealthModifierConfig.getAffectedMobs().matches(mob)) {
+            return;
+        }
+
         CompoundTag persistentData = mob.getPersistentData();
         if (persistentData.getBoolean(MODIFIED_TAG)) {
             return;
