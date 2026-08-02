@@ -197,6 +197,15 @@ laissant que la barre de vie. Passez-le à `false` pour retrouver les pseudos.
 Le masquage ne touche ni au chat, ni à la liste des joueurs (touche Tab), ni aux plaques de nom des
 mobs nommés : uniquement l'étiquette affichée en jeu au-dessus des joueurs.
 
+### Ce que les barres ne font pas
+
+Elles sont **occultées par les blocs** : pas de vision à travers les murs. C'est délibéré — une
+option « voir à travers les murs » sur les barres des joueurs serait un wallhack, et n'a pas sa place
+dans un mod qu'on installe sur un serveur.
+
+Les porte-armures n'en reçoivent pas, bien qu'ils soient techniquement des entités vivantes. Les
+barres n'affichent pas de valeur chiffrée, ni les cœurs d'absorption ou d'armure.
+
 ---
 
 ## Autorité du serveur — `<monde>/serverconfig/mobhealthmodifier-server.toml`
@@ -262,14 +271,6 @@ réglages ne procurent aucun avantage, un serveur n'a pas à dicter l'esthétiqu
 Le point d'arbitrage tient dans une seule classe, `DisplayPolicy` : le rendu ne consulte qu'elle, et
 elle seule décide qui du serveur ou du client l'emporte.
 
-### Ce que les barres ne font pas
-
-Elles sont **occultées par les blocs** : pas de vision à travers les murs. C'est délibéré — une
-option « voir à travers les murs » sur les barres des joueurs serait un wallhack, et n'a pas sa place
-dans un mod qu'on installe sur un serveur.
-
-Les porte-armures n'en reçoivent pas, bien qu'ils soient techniquement des entités vivantes.
-
 ---
 
 ## Fonctionnement
@@ -279,8 +280,10 @@ valeur de base des attributs `MAX_HEALTH` et `ATTACK_DAMAGE`.
 
 ```
 Démarrage
-  └─ MobHealthModifier → MobHealthModifierConfig.register()
-     └─ NeoForge génère config/mobhealthmodifier-common.toml
+  └─ MobHealthModifier enregistre ses trois configurations
+     ├─ COMMON → config/mobhealthmodifier-common.toml
+     ├─ SERVER → <monde>/serverconfig/mobhealthmodifier-server.toml
+     └─ CLIENT → config/mobhealthmodifier-client.toml
 
 Un mob apparaît
   └─ EntityJoinLevelEvent
@@ -297,18 +300,23 @@ pas seulement au spawn. Sans garde-fou, un zombie verrait sa santé doublée à 
 joueur revient dans la zone. Le mod écrit donc un marqueur dans les données persistantes de
 l'entité, ce qui garantit une modification unique par mob.
 
-Côté client, le rendu se greffe sur deux évènements NeoForge :
+Côté client, le rendu se greffe sur deux évènements NeoForge. Chaque décision passe d'abord par
+`DisplayPolicy`, qui tranche entre les réglages imposés par le serveur et ceux du joueur :
 
 ```
+Connexion à un monde
+  └─ NeoForge envoie mobhealthmodifier-server.toml au client
+
 Rendu d'une entité vivante
   └─ RenderLivingEvent.Post
-     └─ HealthBarRenderer : quads orientés face à la caméra, au point d'ancrage
-        de la plaque de nom, décalé de verticalOffset
+     └─ DisplayPolicy : barres actives ? cette catégorie ? à cette distance ?
+        └─ HealthBarRenderer : quads orientés face à la caméra, au point
+           d'ancrage de la plaque de nom, décalé de verticalOffset
 
 Rendu d'une plaque de nom
   └─ RenderNameTagEvent
-     └─ NameTagHandler : setCanRender(FALSE) si c'est un joueur
-        et que hidePlayerNameTags est actif
+     └─ DisplayPolicy : pseudos masqués ?
+        └─ NameTagHandler : setCanRender(FALSE) si c'est un joueur
 ```
 
 La barre est construite en quads jointifs — cadre en quatre bandes, portion pleine, portion vide —
@@ -319,14 +327,17 @@ z-fighting sans dépendre de l'ordre de tri des faces translucides.
 
 ```
 src/main/java/com/marc33/mobhealth/
-├── MobHealthModifier.java              # @Mod, enregistre les deux configs
-├── config/MobHealthModifierConfig.java # config gameplay (COMMON)
-├── config/MobTarget.java               # ciblage ALL / HOSTILE / PASSIVE
-├── events/MobAttributeHandler.java     # applique les multiplicateurs
-└── client/                             # côté client uniquement
-    ├── MobHealthModifierClientConfig.java # config affichage (CLIENT)
-    ├── HealthBarRenderer.java             # dessine les barres de vie
-    └── NameTagHandler.java                # masque les pseudos
+├── MobHealthModifier.java                    # @Mod, enregistre les trois configs
+├── config/
+│   ├── MobHealthModifierConfig.java          # gameplay          (COMMON)
+│   ├── MobHealthModifierServerConfig.java    # affichage imposé  (SERVER, synchronisée)
+│   └── MobTarget.java                        # ciblage ALL / HOSTILE / PASSIVE
+├── events/MobAttributeHandler.java           # applique les multiplicateurs
+└── client/                                   # chargé côté client uniquement
+    ├── MobHealthModifierClientConfig.java    # préférences locales (CLIENT)
+    ├── DisplayPolicy.java                    # arbitre serveur vs client
+    ├── HealthBarRenderer.java                # dessine les barres de vie
+    └── NameTagHandler.java                   # masque les pseudos
 
 src/main/resources/
 ├── META-INF/neoforge.mods.toml         # métadonnées du mod
@@ -349,7 +360,6 @@ src/main/resources/
   (squelette, blaze) infligent des dégâts par un autre biais et ne sont pas affectés côté dégâts.
 - Les barres de vie exigent le mod côté client ; installé sur le serveur seul, il ne fait que
   renforcer les mobs.
-- Les barres n'affichent pas de valeur chiffrée, ni les cœurs d'absorption ou d'armure.
 
 ## Dépannage
 
@@ -374,12 +384,18 @@ grep -i "mobhealthmodifier" logs/latest.log
 
 ## Développement
 
-Ajouter un nouvel attribut (exemple : la vitesse) se fait en trois points :
+**Ajouter un attribut** (exemple : la vitesse) — trois points :
 
 1. Déclarer la valeur dans `MobHealthModifierConfig.Common` avec `defineInRange(...)`.
 2. Ajouter le getter statique correspondant.
 3. L'appliquer dans `MobAttributeHandler.applyModifications()` via
    `mob.getAttribute(Attributes.MOVEMENT_SPEED)`.
+
+**Ajouter un réglage d'affichage** — le déclarer dans `MobHealthModifierClientConfig`, puis exposer
+le getter correspondant dans `DisplayPolicy`. Le rendu ne doit jamais lire une config directement :
+c'est ce qui garantit qu'il n'existe qu'un seul endroit où l'arbitrage serveur/client est décidé. S'il
+doit pouvoir être imposé, le déclarer aussi dans `MobHealthModifierServerConfig` et le brancher sur
+l'interrupteur `enforce*` adéquat.
 
 Lancer un environnement de test :
 
