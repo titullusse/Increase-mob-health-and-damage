@@ -27,7 +27,7 @@ public final class NameTagHandler {
      */
     @SubscribeEvent
     public static void onRenderNameTag(RenderNameTagEvent event) {
-        if (!MobHealthModifierClientConfig.hidePlayerNameTags()) {
+        if (!DisplayPolicy.hidePlayerNameTags()) {
             return;
         }
 

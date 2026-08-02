@@ -1,8 +1,8 @@
 # 📋 Synthèse — Mob Health Modifier
 
 Mod NeoForge 1.21.1 en deux moitiés : un volet **serveur** qui multiplie la vie et les dégâts des
-mobs, et un volet **client** qui affiche une barre de vie au-dessus des mobs et des joueurs. Chacun
-se règle dans son propre fichier TOML et fonctionne sans l'autre.
+mobs, et un volet **client** qui affiche une barre de vie au-dessus des mobs et des joueurs. Chacune
+fonctionne sans l'autre — mais le serveur peut imposer ses réglages d'affichage aux clients.
 
 ---
 
@@ -19,9 +19,11 @@ Increase-mob-health-and-damage/
 │   ├── MobHealthModifier.java
 │   ├── config/MobHealthModifierConfig.java
 │   ├── config/MobTarget.java
+│   ├── config/MobHealthModifierServerConfig.java
 │   ├── events/MobAttributeHandler.java
 │   └── client/
 │       ├── MobHealthModifierClientConfig.java
+│       ├── DisplayPolicy.java
 │       ├── HealthBarRenderer.java
 │       └── NameTagHandler.java
 │
@@ -43,6 +45,7 @@ public class MobHealthModifier {
 
     public MobHealthModifier(IEventBus modEventBus, ModContainer modContainer) {
         MobHealthModifierConfig.register(modContainer);        // ModConfig.Type.COMMON
+        MobHealthModifierServerConfig.register(modContainer);  // ModConfig.Type.SERVER
         MobHealthModifierClientConfig.register(modContainer);  // ModConfig.Type.CLIENT
     }
 }
@@ -179,6 +182,47 @@ public static void onRenderNameTag(RenderNameTagEvent event) {
 l'annule proprement — sans mixin, sans annuler le reste du rendu de l'entité. Seul l'affichage dans
 le monde est concerné : la liste des joueurs, le chat et les mobs nommés ne bougent pas.
 
+### 7. `config/MobHealthModifierServerConfig.java` et `client/DisplayPolicy.java` — autorité du serveur
+
+Un serveur doit pouvoir décider si les barres de vie et les pseudos s'affichent, sans quoi le mod
+serait inutilisable sur un serveur PvP ou RP. Ce besoin est couvert **sans écrire un seul paquet
+réseau** : NeoForge synchronise automatiquement toute configuration de type `SERVER` vers chaque
+client pendant la phase de connexion, avant l'entrée dans le monde. Le client lit ensuite ces valeurs
+comme si elles étaient locales.
+
+```java
+public static void register(ModContainer container) {
+    container.registerConfig(ModConfig.Type.SERVER, SERVER_SPEC);
+}
+```
+
+Le fichier vit dans `<monde>/serverconfig/mobhealthmodifier-server.toml` : une config `SERVER` est
+propre à chaque monde, pas globale comme celles de `config/`.
+
+Deux interrupteurs indépendants — `enforceHealthBarSettings` et `enforceNameTagSettings` — décident
+si les valeurs du serveur remplacent celles du joueur. `DisplayPolicy` est le seul point d'arbitrage,
+et le rendu ne consulte qu'elle :
+
+```java
+public static boolean hidePlayerNameTags() {
+    return MobHealthModifierServerConfig.enforcesNameTagSettings()
+            ? MobHealthModifierServerConfig.hidePlayerNameTags()
+            : MobHealthModifierClientConfig.hidePlayerNameTags();
+}
+```
+
+Deux situations auraient pu poser problème, et se règlent d'elles-mêmes parce que les deux
+`enforce*` valent `false` par défaut :
+
+- **Au menu principal**, aucune config `SERVER` n'est chargée. `isLoaded()` renvoie `false`, les
+  méthodes `enforces*()` aussi, et les préférences locales s'appliquent.
+- **Sur un serveur dépourvu du mod**, NeoForge charge les valeurs par défaut côté client
+  (`loadDefaultServerConfigs`). Les `enforce*` sont donc à `false` et rien n'est imposé.
+
+Trois réglages restent délibérément hors de portée du serveur : `barWidth`, `barHeight` et
+`verticalOffset`. Ils ne procurent aucun avantage de jeu — imposer l'esthétique de chacun n'aurait
+pas de sens.
+
 ---
 
 ## ⚠️ Le piège d'`EntityJoinLevelEvent`
@@ -212,7 +256,7 @@ Deux fichiers, deux portées.
 	damageMultiplier = 1.0        # 0.1 – 10.0
 ```
 
-`config/mobhealthmodifier-client.toml` — affichage, propre à chaque joueur
+`config/mobhealthmodifier-client.toml` — préférences du joueur
 
 ```toml
 [display]
@@ -225,6 +269,21 @@ Deux fichiers, deux portées.
 	barWidth = 40                 # 8 – 120 px
 	barHeight = 5                 # 1 – 20 px
 	verticalOffset = 0.0          # -2.0 – 2.0 blocs
+```
+
+`<monde>/serverconfig/mobhealthmodifier-server.toml` — affichage imposé, synchronisé aux clients
+
+```toml
+[display]
+	enforceHealthBarSettings = false
+	healthBarsEnabled = true
+	showOnHostileMobs = true
+	showOnPassiveMobs = false
+	showOnPlayers = true
+	maxRenderDistance = 24.0
+
+	enforceNameTagSettings = false
+	hidePlayerNameTags = true
 ```
 
 ---
@@ -249,12 +308,16 @@ Deux fichiers, deux portées.
    MAX_HEALTH    : base ×= healthMultiplier, puis setHealth(getMaxHealth())
    ATTACK_DAMAGE : base ×= damageMultiplier  (ignoré si l'attribut est absent)
 
-5. RENDU, À CHAQUE IMAGE, CÔTÉ CLIENT
+5. CONNEXION D'UN CLIENT
+   NeoForge envoie mobhealthmodifier-server.toml au client
+   └─ DisplayPolicy saura si le serveur impose ses réglages
+
+6. RENDU, À CHAQUE IMAGE, CÔTÉ CLIENT
    RenderLivingEvent.Post
-   └─ vivant ? visible ? à portée ? catégorie cochée ?
+   └─ vivant ? visible ? à portée ? catégorie cochée (via DisplayPolicy) ?
       └─ quads billboardés au point d'ancrage de la plaque de nom
    RenderNameTagEvent
-   └─ joueur ? hidePlayerNameTags ? → setCanRender(FALSE)
+   └─ joueur ? DisplayPolicy.hidePlayerNameTags() ? → setCanRender(FALSE)
 ```
 
 `setBaseValue` ne soigne pas l'entité : sans le `setHealth` qui suit, un zombie passé de 20 à 40 HP
@@ -269,7 +332,8 @@ apparaîtrait à moitié blessé.
 - cible les hostiles, les passifs ou tous, au choix (`affectedMobs`) ;
 - chaque modificateur s'active/se désactive indépendamment ;
 - affiche une barre de vie au-dessus des mobs et des joueurs (côté client) ;
-- permet de masquer les pseudos des joueurs, au choix de chacun ;
+- masque les pseudos des joueurs par défaut, réversible côté client ;
+- permet à un serveur d'imposer barres et pseudos à tous ses joueurs ;
 - côté serveur seul, renforce les mobs sans que personne n'installe quoi que ce soit.
 
 **Ne fait pas :**
@@ -319,10 +383,11 @@ tâche `processResources`.
 | Élément | Détail |
 |---------|--------|
 | Fichiers Java | 3 |
-| Classes | 9 (Main, Config, Config.Common, MobTarget, Handler, ClientConfig, ClientConfig.Client, HealthBarRenderer, NameTagHandler) |
+| Classes | 12 (Main, 3 configs + leurs 3 classes internes, MobTarget, Handler, DisplayPolicy, HealthBarRenderer, NameTagHandler) |
 | Évènements écoutés | 3 (`EntityJoinLevelEvent`, `RenderLivingEvent.Post`, `RenderNameTagEvent`) |
+| Fichiers de config | 3 (COMMON, SERVER synchronisée, CLIENT) |
 | Attributs modifiés | 2 (`MAX_HEALTH`, `ATTACK_DAMAGE`) |
-| Paramètres de config | 14 — 5 gameplay (1 enum, 2 booléens, 2 doubles) + 9 affichage (5 booléens, 2 doubles, 2 entiers) |
+| Paramètres de config | 22 — 5 gameplay + 9 affichage local + 8 affichage imposé |
 
 ---
 

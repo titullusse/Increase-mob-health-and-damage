@@ -8,8 +8,9 @@ import org.apache.commons.lang3.tuple.Pair;
 /**
  * Configuration purement visuelle, propre a chaque joueur.
  *
- * <p>Le fichier genere est {@code config/mobhealthmodifier-client.toml}. Contrairement a la config
- * commune, il n'est jamais impose par le serveur : chacun regle l'affichage comme il l'entend.
+ * <p>Le fichier genere est {@code config/mobhealthmodifier-client.toml}. Ces valeurs sont les
+ * preferences du joueur, pas forcement ce qui sera dessine : un serveur peut imposer les siennes.
+ * Le rendu ne lit donc jamais cette classe directement, il passe par {@link DisplayPolicy}.
  */
 public final class MobHealthModifierClientConfig {
 
@@ -51,9 +52,10 @@ public final class MobHealthModifierClientConfig {
             hidePlayerNameTags = builder
                     .comment(
                             "Masquer le pseudo affiche au-dessus des joueurs.",
-                            "Pratique pour ne garder que la barre de vie.",
-                            "N'affecte ni les mobs nommes, ni la liste des joueurs (touche Tab).")
-                    .define("hidePlayerNameTags", false);
+                            "Ne laisse que la barre de vie au-dessus de leur tete.",
+                            "N'affecte ni les mobs nommes, ni la liste des joueurs (touche Tab).",
+                            "Un serveur peut imposer ce reglage et ignorer ce choix.")
+                    .define("hidePlayerNameTags", true);
 
             maxRenderDistance = builder
                     .comment("Distance maximale d'affichage d'une barre, en blocs.")
@@ -132,7 +134,7 @@ public final class MobHealthModifierClientConfig {
      * @return {@code true} si les pseudos des joueurs doivent etre masques
      */
     public static boolean hidePlayerNameTags() {
-        return isLoaded() && CLIENT.hidePlayerNameTags.get();
+        return !isLoaded() || CLIENT.hidePlayerNameTags.get();
     }
 
     /**

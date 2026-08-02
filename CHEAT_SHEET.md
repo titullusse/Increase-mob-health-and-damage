@@ -13,7 +13,7 @@ Aide-mémoire du code et des commandes.
 | Loader | NeoForge 21.1.0+ |
 | Java | 21+ |
 | Build | ModDevGradle 2.0.143 |
-| Fichiers Java | 7 (4 communs + 3 client) |
+| Fichiers Java | 9 (5 communs + 4 client) |
 | Premier build | 5–15 min |
 
 ---
@@ -38,9 +38,11 @@ src/main/java/com/marc33/mobhealth/
 ├── MobHealthModifier.java
 ├── config/MobHealthModifierConfig.java
 ├── config/MobTarget.java
+├── config/MobHealthModifierServerConfig.java   # SERVER, synchronisée au client
 ├── events/MobAttributeHandler.java
 └── client/                          # @EventBusSubscriber(value = Dist.CLIENT)
     ├── MobHealthModifierClientConfig.java
+    ├── DisplayPolicy.java           # arbitre serveur vs client
     ├── HealthBarRenderer.java
     └── NameTagHandler.java
 
@@ -76,12 +78,30 @@ Hostile = `mob instanceof Enemy || getType().getCategory() == MobCategory.MONSTE
 	showOnHostileMobs = true
 	showOnPassiveMobs = false
 	showOnPlayers = true
-	hidePlayerNameTags = false   # masque les pseudos
+	hidePlayerNameTags = true    # masque les pseudos
 	maxRenderDistance = 24.0     # 4 – 64 blocs
 	barWidth = 40                # 8 – 120 px
 	barHeight = 5                # 1 – 20 px
 	verticalOffset = 0.0         # -2.0 – 2.0 blocs
 ```
+
+`<monde>/serverconfig/mobhealthmodifier-server.toml` — ⚠️ pas dans `config/` !
+
+```toml
+[display]
+	enforceHealthBarSettings = false   # true → le serveur décide des barres
+	healthBarsEnabled = true
+	showOnHostileMobs = true
+	showOnPassiveMobs = false
+	showOnPlayers = true
+	maxRenderDistance = 24.0
+
+	enforceNameTagSettings = false     # true → le serveur décide des pseudos
+	hidePlayerNameTags = true
+```
+
+NeoForge synchronise seul toute config `SERVER` vers les clients à la connexion.
+Jamais imposés : `barWidth`, `barHeight`, `verticalOffset`.
 
 ---
 
@@ -92,6 +112,7 @@ Hostile = `mob instanceof Enemy || getType().getCategory() == MobCategory.MONSTE
 @Mod(MobHealthModifier.MOD_ID)
 public MobHealthModifier(IEventBus modEventBus, ModContainer modContainer) {
     MobHealthModifierConfig.register(modContainer);        // COMMON
+    MobHealthModifierServerConfig.register(modContainer);  // SERVER, synchronisée au client
     MobHealthModifierClientConfig.register(modContainer);  // CLIENT, ignoré sur serveur dédié
 }
 ```
@@ -134,6 +155,15 @@ Billboard : `translate(anchor)` → `mulPose(cameraOrientation())` → `scale(0.
 Quads via `RenderType.debugQuads()` — POSITION_COLOR, translucide, **NO_CULL**, sans lightmap.
 Pas de `setLight()` avec ce format, seulement `addVertex(matrix, x, y, z).setColor(argb)`.
 
+### DisplayPolicy (client)
+```java
+return ServerConfig.enforcesNameTagSettings()
+        ? ServerConfig.hidePlayerNameTags()
+        : ClientConfig.hidePlayerNameTags();
+```
+Seul point d'arbitrage serveur/client. Le rendu ne lit **que** cette classe, jamais les configs
+directement.
+
 ### NameTagHandler (client)
 ```java
 @SubscribeEvent
@@ -147,7 +177,7 @@ public static void onRenderNameTag(RenderNameTagEvent event) {
 ## 🔄 Flow
 
 ```
-Startup → register() ×2 → les deux TOML sont générés
+Startup → register() ×3 → les trois TOML sont générés
 
 SERVEUR
 Mob spawn → EntityJoinLevelEvent → applyModifications(mob)
@@ -156,8 +186,9 @@ Mob spawn → EntityJoinLevelEvent → applyModifications(mob)
           → ATTACK_DAMAGE ×= damageMultiplier
 
 CLIENT
-Rendu entité  → RenderLivingEvent.Post → HealthBarRenderer → quads billboardés
-Rendu pseudo  → RenderNameTagEvent     → NameTagHandler   → setCanRender(FALSE)
+Connexion     → NeoForge synchronise mobhealthmodifier-server.toml
+Rendu entité  → RenderLivingEvent.Post → DisplayPolicy → HealthBarRenderer → quads billboardés
+Rendu pseudo  → RenderNameTagEvent     → DisplayPolicy → NameTagHandler   → setCanRender(FALSE)
 ```
 
 ---
@@ -238,6 +269,7 @@ if (speed != null) {
 - Ciblage par catégorie uniquement, pas par type précis de mob
 - Barres de vie = côté client obligatoire (le serveur seul ne suffit pas)
 - Barres occultées par les blocs, sans valeur chiffrée
+- Config SERVER par monde : le fichier vit dans `<monde>/serverconfig/`, pas dans `config/`
 - `ATTACK_DAMAGE` absent chez les creepers et les mobs à distance
 
 ---

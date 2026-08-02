@@ -10,7 +10,7 @@ dans des fichiers de configuration TOML.
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.0+ (compilé avec 21.1.248) |
 | Java | 21+ |
-| Côté | Serveur pour les multiplicateurs, client pour les barres de vie |
+| Côté | Serveur pour les multiplicateurs, client pour l'affichage |
 
 ---
 
@@ -53,16 +53,24 @@ Autrement dit : installez-le côté serveur seul, et tout le monde affronte des 
 rien installer. Pour voir les barres de vie, chaque joueur doit avoir le JAR dans son propre dossier
 `mods/`. Aucune des deux moitiés n'a besoin de l'autre pour fonctionner.
 
+Le serveur peut en revanche **imposer** les réglages d'affichage aux joueurs qui ont le mod — voir
+[Autorité du serveur](#autorité-du-serveur--mondeserverconfigmobhealthmodifier-servertoml).
+
 ---
 
 ## Configuration
 
-Deux fichiers, créés au premier lancement :
+Trois fichiers, créés au premier lancement :
 
-| Fichier | Portée |
-|---------|--------|
-| `config/mobhealthmodifier-common.toml` | Gameplay — multiplicateurs et ciblage |
-| `config/mobhealthmodifier-client.toml` | Affichage — barres de vie et pseudos |
+| Fichier | Emplacement | Portée |
+|---------|-------------|--------|
+| `mobhealthmodifier-common.toml` | `config/` | Gameplay — multiplicateurs et ciblage |
+| `mobhealthmodifier-client.toml` | `config/` | Affichage — préférences du joueur |
+| `mobhealthmodifier-server.toml` | `<monde>/serverconfig/` | Affichage imposé par le serveur |
+
+⚠️ Le fichier serveur n'est **pas** dans `config/` mais dans le dossier du monde —
+`world/serverconfig/` sur un serveur, `saves/<nom du monde>/serverconfig/` en solo. C'est NeoForge
+qui impose cet emplacement : une config `SERVER` est propre à chaque monde.
 
 ### Gameplay — `mobhealthmodifier-common.toml`
 
@@ -159,9 +167,10 @@ passe du vert au rouge en traversant le jaune et l'orange à mesure que la sant�
 	showOnPlayers = true
 
 	# Masquer le pseudo affiche au-dessus des joueurs.
-	# Pratique pour ne garder que la barre de vie.
+	# Ne laisse que la barre de vie au-dessus de leur tete.
 	# N'affecte ni les mobs nommes, ni la liste des joueurs (touche Tab).
-	hidePlayerNameTags = false
+	# Un serveur peut imposer ce reglage et ignorer ce choix.
+	hidePlayerNameTags = true
 
 	# Distance maximale d'affichage d'une barre, en blocs.
 	# Range: 4.0 ~ 64.0
@@ -182,9 +191,76 @@ passe du vert au rouge en traversant le jaune et l'orange à mesure que la sant�
 
 ### Masquer les pseudos
 
-`hidePlayerNameTags = true` supprime le pseudo flottant au-dessus des joueurs, ne laissant que la
-barre de vie. C'est un réglage **local** : il ne change rien pour les autres joueurs, et il ne touche
-ni au chat, ni à la liste des joueurs (touche Tab), ni aux plaques de nom des mobs nommés.
+`hidePlayerNameTags = true` — le défaut — supprime le pseudo flottant au-dessus des joueurs, ne
+laissant que la barre de vie. Passez-le à `false` pour retrouver les pseudos.
+
+Le masquage ne touche ni au chat, ni à la liste des joueurs (touche Tab), ni aux plaques de nom des
+mobs nommés : uniquement l'étiquette affichée en jeu au-dessus des joueurs.
+
+---
+
+## Autorité du serveur — `<monde>/serverconfig/mobhealthmodifier-server.toml`
+
+Par défaut chaque joueur règle son affichage comme il l'entend. Un serveur peut reprendre la main :
+
+```toml
+[display]
+	# Imposer les reglages de barres de vie ci-dessous a tous les joueurs.
+	enforceHealthBarSettings = false
+	healthBarsEnabled = true
+	showOnHostileMobs = true
+	showOnPassiveMobs = false
+	showOnPlayers = true
+	maxRenderDistance = 24.0
+
+	# Imposer la visibilite des pseudos ci-dessous a tous les joueurs.
+	enforceNameTagSettings = false
+	hidePlayerNameTags = true
+```
+
+Les deux interrupteurs sont indépendants :
+
+| Interrupteur | Ce qu'il verrouille |
+|--------------|--------------------|
+| `enforceHealthBarSettings` | Barres actives ou non, sur quelles catégories, à quelle distance |
+| `enforceNameTagSettings` | Visibilité des pseudos des joueurs |
+
+Tant qu'un interrupteur reste à `false`, le fichier client du joueur décide. Dès qu'il passe à
+`true`, les valeurs du serveur juste en dessous s'appliquent à tout le monde et le choix local est
+ignoré pour ce groupe.
+
+**Exemples.** Un serveur PvP qui ne veut pas que la vie des adversaires soit lisible à distance :
+
+```toml
+enforceHealthBarSettings = true
+showOnPlayers = false        # pas de barre sur les joueurs
+showOnHostileMobs = true     # mais on garde celles des mobs
+```
+
+Un serveur RP qui impose l'anonymat :
+
+```toml
+enforceNameTagSettings = true
+hidePlayerNameTags = true
+```
+
+### Comment ça marche
+
+Aucun paquet réseau n'a été écrit pour cela. NeoForge synchronise automatiquement toute
+configuration de type `SERVER` vers chaque client pendant la phase de connexion, avant l'entrée dans
+le monde ; le client lit ensuite ces valeurs comme si elles étaient les siennes.
+
+Deux garde-fous encadrent le basculement :
+
+- **Hors partie**, au menu principal, la config serveur n'est pas chargée : rien n'est imposé.
+- **Sur un serveur dépourvu du mod**, NeoForge charge les valeurs par défaut, dans lesquelles les
+  deux `enforce*` valent `false`. Les préférences du joueur s'appliquent donc normalement.
+
+Ce que le serveur ne verrouille **jamais** : `barWidth`, `barHeight` et `verticalOffset`. Ces trois
+réglages ne procurent aucun avantage, un serveur n'a pas à dicter l'esthétique de chacun.
+
+Le point d'arbitrage tient dans une seule classe, `DisplayPolicy` : le rendu ne consulte qu'elle, et
+elle seule décide qui du serveur ou du client l'emporte.
 
 ### Ce que les barres ne font pas
 
@@ -283,6 +359,8 @@ src/main/resources/
 | Les mobs ne changent pas | Vérifiez que ce sont de **nouveaux** spawns, que les `enable*` sont à `true`, et que `affectedMobs` couvre bien le mob testé (par défaut `HOSTILE` : une vache n'est pas affectée). |
 | Le mod n'apparaît pas dans la liste | Vérifiez la version de NeoForge (21.1.x) et que le JAR est bien dans `mods/`. |
 | Aucune barre de vie en multijoueur | Le rendu est côté client : le JAR doit être dans **votre** dossier `mods/`, pas seulement sur le serveur. |
+| Mes réglages d'affichage sont ignorés | Le serveur les impose. Regardez les `enforce*` dans `<monde>/serverconfig/mobhealthmodifier-server.toml`. |
+| Je ne trouve pas le fichier serveur | Il est dans le dossier du monde, pas dans `config/`, et il n'apparaît qu'après le premier chargement du monde. |
 | Barres invisibles sur les animaux | `showOnPassiveMobs` est à `false` par défaut. |
 | Barres qui disparaissent de loin | Augmentez `maxRenderDistance`. |
 | Erreur de compilation Java | `java -version` doit indiquer 21 ou plus. |

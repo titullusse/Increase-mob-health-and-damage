@@ -76,7 +76,7 @@ public final class HealthBarRenderer {
      * @return {@code true} si la barre doit etre dessinee
      */
     private static boolean shouldRender(LivingEntity entity) {
-        if (!MobHealthModifierClientConfig.areHealthBarsEnabled()) {
+        if (!DisplayPolicy.areHealthBarsEnabled()) {
             return false;
         }
 
@@ -96,19 +96,19 @@ public final class HealthBarRenderer {
         }
 
         EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
-        double maxDistance = MobHealthModifierClientConfig.getMaxRenderDistance();
+        double maxDistance = DisplayPolicy.getMaxRenderDistance();
         if (dispatcher.distanceToSqr(entity) > maxDistance * maxDistance) {
             return false;
         }
 
         if (entity instanceof Player) {
-            return MobHealthModifierClientConfig.showOnPlayers();
+            return DisplayPolicy.showOnPlayers();
         }
 
         if (entity instanceof Mob mob) {
             return MobTarget.HOSTILE.matches(mob)
-                    ? MobHealthModifierClientConfig.showOnHostileMobs()
-                    : MobHealthModifierClientConfig.showOnPassiveMobs();
+                    ? DisplayPolicy.showOnHostileMobs()
+                    : DisplayPolicy.showOnPassiveMobs();
         }
 
         // Porte-armures et autres entites vivantes sans comportement : pas de barre.
@@ -133,14 +133,14 @@ public final class HealthBarRenderer {
         }
 
         float fraction = Mth.clamp(entity.getHealth() / entity.getMaxHealth(), 0.0F, 1.0F);
-        float width = MobHealthModifierClientConfig.getBarWidth();
-        float height = MobHealthModifierClientConfig.getBarHeight();
+        float width = DisplayPolicy.getBarWidth();
+        float height = DisplayPolicy.getBarHeight();
         float halfWidth = width / 2.0F;
 
         poseStack.pushPose();
         poseStack.translate(
                 anchor.x,
-                anchor.y + 0.5D + MobHealthModifierClientConfig.getVerticalOffset(),
+                anchor.y + 0.5D + DisplayPolicy.getVerticalOffset(),
                 anchor.z);
         poseStack.mulPose(Minecraft.getInstance().getEntityRenderDispatcher().cameraOrientation());
         poseStack.scale(SCALE, -SCALE, SCALE);

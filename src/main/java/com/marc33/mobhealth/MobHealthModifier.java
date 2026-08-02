@@ -2,6 +2,7 @@ package com.marc33.mobhealth;
 
 import com.marc33.mobhealth.client.MobHealthModifierClientConfig;
 import com.marc33.mobhealth.config.MobHealthModifierConfig;
+import com.marc33.mobhealth.config.MobHealthModifierServerConfig;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -31,6 +32,10 @@ public class MobHealthModifier {
      */
     public MobHealthModifier(IEventBus modEventBus, ModContainer modContainer) {
         MobHealthModifierConfig.register(modContainer);
+
+        // Une config de type SERVER est synchronisee vers chaque client a la connexion : c'est ce
+        // qui permet au serveur d'imposer l'affichage des barres et des pseudos.
+        MobHealthModifierServerConfig.register(modContainer);
 
         // Une config de type CLIENT n'est chargee que sur un client ; l'enregistrer depuis le
         // constructeur commun est sans effet sur un serveur dedie.
