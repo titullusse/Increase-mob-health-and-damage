@@ -224,7 +224,7 @@ Deux fichiers, deux portées.
 	maxRenderDistance = 24.0      # 4 – 64 blocs
 	barWidth = 40                 # 8 – 120 px
 	barHeight = 5                 # 1 – 20 px
-	verticalOffset = 0.3          # -2.0 – 2.0 blocs
+	verticalOffset = 0.0          # -2.0 – 2.0 blocs
 ```
 
 ---

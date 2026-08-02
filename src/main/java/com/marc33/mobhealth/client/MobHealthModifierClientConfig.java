@@ -69,7 +69,7 @@ public final class MobHealthModifierClientConfig {
 
             verticalOffset = builder
                     .comment("Decalage vertical de la barre, en blocs. Negatif = plus bas.")
-                    .defineInRange("verticalOffset", 0.3D, -2.0D, 2.0D);
+                    .defineInRange("verticalOffset", 0.0D, -2.0D, 2.0D);
 
             builder.pop();
         }
@@ -160,6 +160,6 @@ public final class MobHealthModifierClientConfig {
      * @return le decalage vertical de la barre, en blocs
      */
     public static double getVerticalOffset() {
-        return isLoaded() ? CLIENT.verticalOffset.get() : 0.3D;
+        return isLoaded() ? CLIENT.verticalOffset.get() : 0.0D;
     }
 }

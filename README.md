@@ -177,7 +177,7 @@ passe du vert au rouge en traversant le jaune et l'orange √† mesure que la sant√
 
 	# Decalage vertical de la barre, en blocs. Negatif = plus bas.
 	# Range: -2.0 ~ 2.0
-	verticalOffset = 0.3
+	verticalOffset = 0.0
 ```
 
 ### Masquer les pseudos
