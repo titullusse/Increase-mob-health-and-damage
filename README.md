@@ -1,7 +1,8 @@
 # Increase-mob-health-and-damage
 
-**Mob Health Modifier** — mod NeoForge pour Minecraft 1.21.1 qui multiplie globalement la **santé**
-et les **dégâts** de tous les mobs, via un simple fichier de configuration TOML.
+**Mob Health Modifier** — mod NeoForge pour Minecraft 1.21.1 qui multiplie la **santé** et les
+**dégâts** des mobs, et affiche une **barre de vie** au-dessus des mobs et des joueurs. Tout se règle
+dans des fichiers de configuration TOML.
 
 | | |
 |---|---|
@@ -9,7 +10,7 @@ et les **dégâts** de tous les mobs, via un simple fichier de configuration TOM
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.0+ (compilé avec 21.1.248) |
 | Java | 21+ |
-| Côté | Serveur (fonctionne aussi en solo) |
+| Côté | Serveur pour les multiplicateurs, client pour les barres de vie |
 
 ---
 
@@ -41,14 +42,29 @@ créé au premier démarrage.
 cp build/libs/mobhealthmodifier-1.0.0.jar /chemin/vers/serveur/mods/
 ```
 
-Le mod est purement serveur : les clients n'ont **pas** besoin de l'installer pour rejoindre. Les
-nouvelles valeurs de santé et de dégâts sont synchronisées automatiquement.
+Le mod se sépare en deux moitiés indépendantes :
+
+| Fonction | Où elle s'exécute | Le client doit-il l'installer ? |
+|----------|-------------------|--------------------------------|
+| Multiplicateurs santé / dégâts | Serveur | Non — les valeurs sont synchronisées |
+| Barres de vie, masquage des pseudos | Client | **Oui** |
+
+Autrement dit : installez-le côté serveur seul, et tout le monde affronte des mobs renforcés sans
+rien installer. Pour voir les barres de vie, chaque joueur doit avoir le JAR dans son propre dossier
+`mods/`. Aucune des deux moitiés n'a besoin de l'autre pour fonctionner.
 
 ---
 
 ## Configuration
 
-Fichier : `config/mobhealthmodifier-common.toml` (créé au premier lancement).
+Deux fichiers, créés au premier lancement :
+
+| Fichier | Portée |
+|---------|--------|
+| `config/mobhealthmodifier-common.toml` | Gameplay — multiplicateurs et ciblage |
+| `config/mobhealthmodifier-client.toml` | Affichage — barres de vie et pseudos |
+
+### Gameplay — `mobhealthmodifier-common.toml`
 
 ```toml
 [general]
@@ -122,6 +138,64 @@ Avec `healthMultiplier = 2.0` et `damageMultiplier = 1.5` :
 
 ---
 
+## Barres de vie — `mobhealthmodifier-client.toml`
+
+Une barre de progression flotte au-dessus de chaque entité concernée, orientée face à la caméra. Elle
+passe du vert au rouge en traversant le jaune et l'orange à mesure que la santé descend.
+
+```toml
+[display]
+	# Interrupteur general des barres de vie.
+	enableHealthBars = true
+
+	# Afficher une barre au-dessus des mobs hostiles.
+	showOnHostileMobs = true
+
+	# Afficher une barre au-dessus des mobs passifs.
+	showOnPassiveMobs = false
+
+	# Afficher une barre au-dessus des joueurs.
+	# Vous compris, si vous passez en vue a la troisieme personne.
+	showOnPlayers = true
+
+	# Masquer le pseudo affiche au-dessus des joueurs.
+	# Pratique pour ne garder que la barre de vie.
+	# N'affecte ni les mobs nommes, ni la liste des joueurs (touche Tab).
+	hidePlayerNameTags = false
+
+	# Distance maximale d'affichage d'une barre, en blocs.
+	# Range: 4.0 ~ 64.0
+	maxRenderDistance = 24.0
+
+	# Largeur de la barre, en pixels (40 = un bloc de large).
+	# Range: 8 ~ 120
+	barWidth = 40
+
+	# Hauteur de la barre, en pixels.
+	# Range: 1 ~ 20
+	barHeight = 5
+
+	# Decalage vertical de la barre, en blocs. Negatif = plus bas.
+	# Range: -2.0 ~ 2.0
+	verticalOffset = 0.3
+```
+
+### Masquer les pseudos
+
+`hidePlayerNameTags = true` supprime le pseudo flottant au-dessus des joueurs, ne laissant que la
+barre de vie. C'est un réglage **local** : il ne change rien pour les autres joueurs, et il ne touche
+ni au chat, ni à la liste des joueurs (touche Tab), ni aux plaques de nom des mobs nommés.
+
+### Ce que les barres ne font pas
+
+Elles sont **occultées par les blocs** : pas de vision à travers les murs. C'est délibéré — une
+option « voir à travers les murs » sur les barres des joueurs serait un wallhack, et n'a pas sa place
+dans un mod qu'on installe sur un serveur.
+
+Les porte-armures n'en reçoivent pas, bien qu'ils soient techniquement des entités vivantes.
+
+---
+
 ## Fonctionnement
 
 Le mod écoute `EntityJoinLevelEvent` et, pour chaque `Mob` arrivant côté serveur, multiplie la
@@ -147,14 +221,36 @@ pas seulement au spawn. Sans garde-fou, un zombie verrait sa santé doublée à 
 joueur revient dans la zone. Le mod écrit donc un marqueur dans les données persistantes de
 l'entité, ce qui garantit une modification unique par mob.
 
+Côté client, le rendu se greffe sur deux évènements NeoForge :
+
+```
+Rendu d'une entité vivante
+  └─ RenderLivingEvent.Post
+     └─ HealthBarRenderer : quads orientés face à la caméra, au point d'ancrage
+        de la plaque de nom, décalé de verticalOffset
+
+Rendu d'une plaque de nom
+  └─ RenderNameTagEvent
+     └─ NameTagHandler : setCanRender(FALSE) si c'est un joueur
+        et que hidePlayerNameTags est actif
+```
+
+La barre est construite en quads jointifs — cadre en quatre bandes, portion pleine, portion vide —
+plutôt qu'en rectangles empilés. Aucune surface ne se superpose, ce qui écarte tout risque de
+z-fighting sans dépendre de l'ordre de tri des faces translucides.
+
 ### Structure
 
 ```
 src/main/java/com/marc33/mobhealth/
-├── MobHealthModifier.java              # @Mod, enregistre la config
-├── config/MobHealthModifierConfig.java # structure TOML + getters
+├── MobHealthModifier.java              # @Mod, enregistre les deux configs
+├── config/MobHealthModifierConfig.java # config gameplay (COMMON)
 ├── config/MobTarget.java               # ciblage ALL / HOSTILE / PASSIVE
-└── events/MobAttributeHandler.java     # applique les multiplicateurs
+├── events/MobAttributeHandler.java     # applique les multiplicateurs
+└── client/                             # côté client uniquement
+    ├── MobHealthModifierClientConfig.java # config affichage (CLIENT)
+    ├── HealthBarRenderer.java             # dessine les barres de vie
+    └── NameTagHandler.java                # masque les pseudos
 
 src/main/resources/
 ├── META-INF/neoforge.mods.toml         # métadonnées du mod
@@ -175,6 +271,9 @@ src/main/resources/
   donner un multiplicateur différent aux zombies et aux creepers.
 - `ATTACK_DAMAGE` n'existe pas sur tous les mobs. Les creepers (explosion) et les mobs à distance
   (squelette, blaze) infligent des dégâts par un autre biais et ne sont pas affectés côté dégâts.
+- Les barres de vie exigent le mod côté client ; installé sur le serveur seul, il ne fait que
+  renforcer les mobs.
+- Les barres n'affichent pas de valeur chiffrée, ni les cœurs d'absorption ou d'armure.
 
 ## Dépannage
 
@@ -183,6 +282,9 @@ src/main/resources/
 | Le fichier de config n'existe pas | Il est créé au **premier** lancement ; démarrez une fois puis quittez. |
 | Les mobs ne changent pas | Vérifiez que ce sont de **nouveaux** spawns, que les `enable*` sont à `true`, et que `affectedMobs` couvre bien le mob testé (par défaut `HOSTILE` : une vache n'est pas affectée). |
 | Le mod n'apparaît pas dans la liste | Vérifiez la version de NeoForge (21.1.x) et que le JAR est bien dans `mods/`. |
+| Aucune barre de vie en multijoueur | Le rendu est côté client : le JAR doit être dans **votre** dossier `mods/`, pas seulement sur le serveur. |
+| Barres invisibles sur les animaux | `showOnPassiveMobs` est à `false` par défaut. |
+| Barres qui disparaissent de loin | Augmentez `maxRenderDistance`. |
 | Erreur de compilation Java | `java -version` doit indiquer 21 ou plus. |
 
 ```bash

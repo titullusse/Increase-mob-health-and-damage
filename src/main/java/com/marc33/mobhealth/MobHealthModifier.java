@@ -1,5 +1,6 @@
 package com.marc33.mobhealth;
 
+import com.marc33.mobhealth.client.MobHealthModifierClientConfig;
 import com.marc33.mobhealth.config.MobHealthModifierConfig;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
@@ -30,6 +31,11 @@ public class MobHealthModifier {
      */
     public MobHealthModifier(IEventBus modEventBus, ModContainer modContainer) {
         MobHealthModifierConfig.register(modContainer);
+
+        // Une config de type CLIENT n'est chargee que sur un client ; l'enregistrer depuis le
+        // constructeur commun est sans effet sur un serveur dedie.
+        MobHealthModifierClientConfig.register(modContainer);
+
         LOGGER.info("Mob Health Modifier charge");
     }
 }

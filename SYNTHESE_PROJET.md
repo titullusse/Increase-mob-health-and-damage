@@ -1,7 +1,8 @@
 # 📋 Synthèse — Mob Health Modifier
 
-Mod NeoForge 1.21.1 qui multiplie la **vie** et les **dégâts** des mobs — hostiles par défaut,
-passifs ou tous au choix — via un fichier de configuration TOML.
+Mod NeoForge 1.21.1 en deux moitiés : un volet **serveur** qui multiplie la vie et les dégâts des
+mobs, et un volet **client** qui affiche une barre de vie au-dessus des mobs et des joueurs. Chacun
+se règle dans son propre fichier TOML et fonctionne sans l'autre.
 
 ---
 
@@ -18,7 +19,11 @@ Increase-mob-health-and-damage/
 │   ├── MobHealthModifier.java
 │   ├── config/MobHealthModifierConfig.java
 │   ├── config/MobTarget.java
-│   └── events/MobAttributeHandler.java
+│   ├── events/MobAttributeHandler.java
+│   └── client/
+│       ├── MobHealthModifierClientConfig.java
+│       ├── HealthBarRenderer.java
+│       └── NameTagHandler.java
 │
 └── src/main/resources/
     ├── META-INF/neoforge.mods.toml
@@ -37,13 +42,19 @@ public class MobHealthModifier {
     public static final String MOD_ID = "mobhealthmodifier";
 
     public MobHealthModifier(IEventBus modEventBus, ModContainer modContainer) {
-        MobHealthModifierConfig.register(modContainer);
+        MobHealthModifierConfig.register(modContainer);        // ModConfig.Type.COMMON
+        MobHealthModifierClientConfig.register(modContainer);  // ModConfig.Type.CLIENT
     }
 }
 ```
 
 En NeoForge 1.21, le constructeur du mod peut demander les services dont il a besoin par injection :
 `IEventBus` pour le bus du mod, `ModContainer` pour enregistrer la configuration.
+
+Une config de type `CLIENT` n'est chargée que sur un client : l'enregistrer inconditionnellement
+depuis le constructeur commun est sans effet sur un serveur dédié. Seules les classes de rendu, qui
+touchent réellement à des classes client, sont marquées `@EventBusSubscriber(value = Dist.CLIENT)`
+pour ne jamais être chargées côté serveur.
 
 ### 2. `MobHealthModifierConfig.java` — configuration
 
@@ -114,6 +125,60 @@ Quatre filtres avant modification :
    change plus tard.
 4. **Mobs déjà traités ignorés** — voir ci-dessous.
 
+### 5. `client/HealthBarRenderer.java` — barres de vie
+
+```java
+@EventBusSubscriber(modid = MobHealthModifier.MOD_ID, value = Dist.CLIENT)
+public final class HealthBarRenderer {
+    @SubscribeEvent
+    public static void onRenderLiving(RenderLivingEvent.Post<?, ?> event) { ... }
+}
+```
+
+`RenderLivingEvent.Post` est émis par `LivingEntityRenderer.render` **après** son `popPose()` : la
+pile de matrices est donc revenue à l'origine de l'entité, exactement dans l'état où le jeu s'apprête
+à dessiner la plaque de nom. C'est le point d'accroche idéal, et il vaut aussi pour les joueurs —
+`PlayerRenderer.render` délègue à `super.render`, qui émet l'évènement.
+
+Le billboard reprend la recette de `EntityRenderer#renderNameTag` :
+
+```java
+poseStack.translate(anchor.x, anchor.y + 0.5D + offset, anchor.z);
+poseStack.mulPose(dispatcher.cameraOrientation());
+poseStack.scale(0.025F, -0.025F, 0.025F);
+```
+
+Le `-0.025F` inverse l'axe Y : dans le repère local qui suit, **les valeurs négatives montent**. La
+barre occupe donc `y ∈ [-hauteur, 0]`.
+
+Deux choix méritent d'être expliqués :
+
+- **`RenderType.debugQuads()`** — malgré son nom, c'est le type public qui correspond exactement au
+  besoin : `POSITION_COLOR`, quads translucides, **sans face culling** (le sens d'enroulement des
+  sommets n'a donc pas d'importance) et sans lightmap, si bien que la barre reste lisible en pleine
+  nuit. Ce format n'accepte pas `setLight()` : chaque sommet se résume à
+  `addVertex(matrix, x, y, z).setColor(argb)`.
+- **Des quads jointifs plutôt qu'empilés** — le cadre est dessiné en quatre bandes autour de la
+  barre, et le fond ne couvre que la portion vide. Aucune surface ne se superpose, ce qui supprime le
+  risque de z-fighting entre faces coplanaires sans dépendre de l'ordre de tri des translucides.
+
+La couleur suit la teinte du cercle chromatique, de 0 (rouge) à 1/3 (vert) :
+`Mth.hsvToArgb(fraction / 3.0F, 1.0F, 1.0F, 255)`.
+
+### 6. `client/NameTagHandler.java` — masquage des pseudos
+
+```java
+@SubscribeEvent
+public static void onRenderNameTag(RenderNameTagEvent event) {
+    if (!hidePlayerNameTags()) return;
+    if (event.getEntity() instanceof Player) event.setCanRender(TriState.FALSE);
+}
+```
+
+`RenderNameTagEvent` est émis juste avant le rendu de la plaque, et `setCanRender(TriState.FALSE)`
+l'annule proprement — sans mixin, sans annuler le reste du rendu de l'entité. Seul l'affichage dans
+le monde est concerné : la liste des joueurs, le chat et les mobs nommés ne bougent pas.
+
 ---
 
 ## ⚠️ Le piège d'`EntityJoinLevelEvent`
@@ -134,7 +199,9 @@ Conséquence assumée : changer la configuration n'affecte pas les mobs déjà m
 
 ## ⚙️ Configuration
 
-`config/mobhealthmodifier-common.toml`
+Deux fichiers, deux portées.
+
+`config/mobhealthmodifier-common.toml` — gameplay, imposé par le serveur
 
 ```toml
 [general]
@@ -143,6 +210,21 @@ Conséquence assumée : changer la configuration n'affecte pas les mobs déjà m
 	healthMultiplier = 1.0        # 0.1 – 10.0
 	enableDamageModification = true
 	damageMultiplier = 1.0        # 0.1 – 10.0
+```
+
+`config/mobhealthmodifier-client.toml` — affichage, propre à chaque joueur
+
+```toml
+[display]
+	enableHealthBars = true
+	showOnHostileMobs = true
+	showOnPassiveMobs = false
+	showOnPlayers = true
+	hidePlayerNameTags = false
+	maxRenderDistance = 24.0      # 4 – 64 blocs
+	barWidth = 40                 # 8 – 120 px
+	barHeight = 5                 # 1 – 20 px
+	verticalOffset = 0.3          # -2.0 – 2.0 blocs
 ```
 
 ---
@@ -166,6 +248,13 @@ Conséquence assumée : changer la configuration n'affecte pas les mobs déjà m
 4. MODIFICATION
    MAX_HEALTH    : base ×= healthMultiplier, puis setHealth(getMaxHealth())
    ATTACK_DAMAGE : base ×= damageMultiplier  (ignoré si l'attribut est absent)
+
+5. RENDU, À CHAQUE IMAGE, CÔTÉ CLIENT
+   RenderLivingEvent.Post
+   └─ vivant ? visible ? à portée ? catégorie cochée ?
+      └─ quads billboardés au point d'ancrage de la plaque de nom
+   RenderNameTagEvent
+   └─ joueur ? hidePlayerNameTags ? → setCanRender(FALSE)
 ```
 
 `setBaseValue` ne soigne pas l'entité : sans le `setHealth` qui suit, un zombie passé de 20 à 40 HP
@@ -179,12 +268,16 @@ apparaîtrait à moitié blessé.
 - multiplie santé et dégâts des mobs qui apparaissent, hostiles par défaut ;
 - cible les hostiles, les passifs ou tous, au choix (`affectedMobs`) ;
 - chaque modificateur s'active/se désactive indépendamment ;
-- fonctionne en solo comme en serveur, sans mod côté client.
+- affiche une barre de vie au-dessus des mobs et des joueurs (côté client) ;
+- permet de masquer les pseudos des joueurs, au choix de chacun ;
+- côté serveur seul, renforce les mobs sans que personne n'installe quoi que ce soit.
 
 **Ne fait pas :**
 - modifier les mobs déjà présents avant l'installation ;
 - appliquer une nouvelle config aux mobs existants ;
 - recharger la config à chaud, ni fournir commande ou GUI ;
+- afficher les barres sans le mod côté client — le rendu est local par nature ;
+- montrer les barres à travers les murs : ce serait un wallhack sur les joueurs ;
 - distinguer les types précis de mobs : le ciblage se fait par catégorie, pas zombie par zombie.
 
 **Exemple** — `healthMultiplier = 2.0`, `damageMultiplier = 1.5` :
@@ -226,10 +319,10 @@ tâche `processResources`.
 | Élément | Détail |
 |---------|--------|
 | Fichiers Java | 3 |
-| Classes | 5 (Main, Config, Config.Common, MobTarget, Handler) |
-| Évènements écoutés | 1 (`EntityJoinLevelEvent`) |
+| Classes | 9 (Main, Config, Config.Common, MobTarget, Handler, ClientConfig, ClientConfig.Client, HealthBarRenderer, NameTagHandler) |
+| Évènements écoutés | 3 (`EntityJoinLevelEvent`, `RenderLivingEvent.Post`, `RenderNameTagEvent`) |
 | Attributs modifiés | 2 (`MAX_HEALTH`, `ATTACK_DAMAGE`) |
-| Paramètres de config | 5 (1 enum, 2 booléens, 2 doubles) |
+| Paramètres de config | 14 — 5 gameplay (1 enum, 2 booléens, 2 doubles) + 9 affichage (5 booléens, 2 doubles, 2 entiers) |
 
 ---
 

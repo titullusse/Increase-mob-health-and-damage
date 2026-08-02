@@ -13,7 +13,7 @@ Aide-mémoire du code et des commandes.
 | Loader | NeoForge 21.1.0+ |
 | Java | 21+ |
 | Build | ModDevGradle 2.0.143 |
-| Fichiers Java | 3 |
+| Fichiers Java | 7 (4 communs + 3 client) |
 | Premier build | 5–15 min |
 
 ---
@@ -38,7 +38,11 @@ src/main/java/com/marc33/mobhealth/
 ├── MobHealthModifier.java
 ├── config/MobHealthModifierConfig.java
 ├── config/MobTarget.java
-└── events/MobAttributeHandler.java
+├── events/MobAttributeHandler.java
+└── client/                          # @EventBusSubscriber(value = Dist.CLIENT)
+    ├── MobHealthModifierClientConfig.java
+    ├── HealthBarRenderer.java
+    └── NameTagHandler.java
 
 src/main/resources/
 ├── META-INF/neoforge.mods.toml   # NeoForge 1.21+ : PAS mods.toml
@@ -64,15 +68,31 @@ Presets : facile `0.5/0.5` · normal `1.0/1.0` · difficile `2.0/2.0` · hardcor
 
 Hostile = `mob instanceof Enemy || getType().getCategory() == MobCategory.MONSTER`
 
+`config/mobhealthmodifier-client.toml` (affichage, local)
+
+```toml
+[display]
+	enableHealthBars = true
+	showOnHostileMobs = true
+	showOnPassiveMobs = false
+	showOnPlayers = true
+	hidePlayerNameTags = false   # masque les pseudos
+	maxRenderDistance = 24.0     # 4 – 64 blocs
+	barWidth = 40                # 8 – 120 px
+	barHeight = 5                # 1 – 20 px
+	verticalOffset = 0.3         # -2.0 – 2.0 blocs
+```
+
 ---
 
-## 🎯 Les 3 classes
+## 🎯 Les classes
 
 ### MobHealthModifier
 ```java
 @Mod(MobHealthModifier.MOD_ID)
 public MobHealthModifier(IEventBus modEventBus, ModContainer modContainer) {
-    MobHealthModifierConfig.register(modContainer);
+    MobHealthModifierConfig.register(modContainer);        // COMMON
+    MobHealthModifierClientConfig.register(modContainer);  // CLIENT, ignoré sur serveur dédié
 }
 ```
 Point d'entrée. Le constructeur reçoit le `ModContainer`, indispensable pour enregistrer la config.
@@ -102,16 +122,42 @@ public enum MobTarget { ALL, HOSTILE, PASSIVE }   // abstract boolean matches(Mo
 ```
 Lu depuis le TOML avec `builder.defineEnum("affectedMobs", MobTarget.HOSTILE)`.
 
+### HealthBarRenderer (client)
+```java
+@SubscribeEvent
+public static void onRenderLiving(RenderLivingEvent.Post<?, ?> event)
+```
+Post est émis après `popPose()` : la pile est à l'origine de l'entité, comme pour la plaque de nom.
+Billboard : `translate(anchor)` → `mulPose(cameraOrientation())` → `scale(0.025F, -0.025F, 0.025F)`.
+⚠️ L'axe Y est inversé par ce scale : les valeurs négatives montent.
+
+Quads via `RenderType.debugQuads()` — POSITION_COLOR, translucide, **NO_CULL**, sans lightmap.
+Pas de `setLight()` avec ce format, seulement `addVertex(matrix, x, y, z).setColor(argb)`.
+
+### NameTagHandler (client)
+```java
+@SubscribeEvent
+public static void onRenderNameTag(RenderNameTagEvent event) {
+    if (event.getEntity() instanceof Player) event.setCanRender(TriState.FALSE);
+}
+```
+
 ---
 
 ## 🔄 Flow
 
 ```
-Startup → register() → TOML généré
+Startup → register() ×2 → les deux TOML sont générés
+
+SERVEUR
 Mob spawn → EntityJoinLevelEvent → applyModifications(mob)
           → affectedMobs.matches(mob) ? sinon on sort sans marquer
           → MAX_HEALTH ×= healthMultiplier (+ setHealth(getMaxHealth()))
           → ATTACK_DAMAGE ×= damageMultiplier
+
+CLIENT
+Rendu entité  → RenderLivingEvent.Post → HealthBarRenderer → quads billboardés
+Rendu pseudo  → RenderNameTagEvent     → NameTagHandler   → setCanRender(FALSE)
 ```
 
 ---
@@ -140,6 +186,15 @@ import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 // Mod
 import net.neoforged.fml.common.Mod;
 import net.neoforged.bus.api.IEventBus;
+
+// Rendu (client)
+import net.neoforged.neoforge.client.event.RenderLivingEvent;
+import net.neoforged.neoforge.client.event.RenderNameTagEvent;
+import net.neoforged.neoforge.common.util.TriState;
+import net.neoforged.api.distmarker.Dist;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.world.entity.EntityAttachment;
+import org.joml.Matrix4f;
 ```
 
 ⚠️ En 1.21.1 les `Attributes.X` sont des `Holder<Attribute>`, pas des `Attribute`.
@@ -181,6 +236,8 @@ if (speed != null) {
 - Redémarrage requis après édition du TOML
 - Pas de commande ni de GUI
 - Ciblage par catégorie uniquement, pas par type précis de mob
+- Barres de vie = côté client obligatoire (le serveur seul ne suffit pas)
+- Barres occultées par les blocs, sans valeur chiffrée
 - `ATTACK_DAMAGE` absent chez les creepers et les mobs à distance
 
 ---
@@ -202,4 +259,5 @@ cat config/mobhealthmodifier-common.toml
 - [ ] Jeu/serveur redémarré une fois → TOML créé
 - [ ] Config éditée, redémarrage
 - [ ] Nouveau mob spawné et testé
+- [ ] Barre de vie visible (JAR aussi côté client !)
 - [ ] Logs sans erreur
