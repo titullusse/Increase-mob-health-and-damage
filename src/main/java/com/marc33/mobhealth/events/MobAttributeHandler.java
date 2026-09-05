@@ -2,8 +2,10 @@ package com.marc33.mobhealth.events;
 
 import com.marc33.mobhealth.MobHealthModifier;
 import com.marc33.mobhealth.config.MobHealthModifierConfig;
+import net.minecraft.core.Holder;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -68,61 +70,56 @@ public final class MobAttributeHandler {
         }
         persistentData.putBoolean(MODIFIED_TAG, true);
 
-        if (MobHealthModifierConfig.isHealthModificationEnabled()) {
-            applyHealth(mob, MobHealthModifierConfig.getHealthMultiplier());
+        if (MobHealthModifierConfig.isHealthModificationEnabled()
+                && scale(mob, Attributes.MAX_HEALTH, MobHealthModifierConfig.getHealthMultiplier())) {
+            // setBaseValue ne soigne pas le mob : sans cela il apparaitrait blesse.
+            mob.setHealth(mob.getMaxHealth());
         }
 
         if (MobHealthModifierConfig.isDamageModificationEnabled()) {
-            applyDamage(mob, MobHealthModifierConfig.getDamageMultiplier());
+            scale(mob, Attributes.ATTACK_DAMAGE, MobHealthModifierConfig.getDamageMultiplier());
         }
     }
 
     /**
-     * Applique le multiplicateur de sante et remet le mob a sa nouvelle sante maximale.
+     * Multiplie la valeur de base d'un attribut, en respectant les bornes du jeu.
+     *
+     * <p>Chaque attribut vanilla declare son propre intervalle : {@code MAX_HEALTH} s'arrete a 1024
+     * et {@code ATTACK_DAMAGE} a 2048. Minecraft ramene de lui-meme la valeur effective dans cet
+     * intervalle, mais pas la valeur de base stockee. On passe donc explicitement par
+     * {@code sanitizeValue} afin que la valeur ecrite corresponde a celle reellement utilisee,
+     * plutot que de laisser un nombre sans rapport dans les donnees de l'entite.
      *
      * @param mob mob a modifier
-     * @param multiplier facteur applique a la valeur de base de {@code MAX_HEALTH}
+     * @param attribute attribut vise
+     * @param multiplier facteur applique a la valeur de base
+     * @return {@code true} si l'attribut a effectivement ete modifie
      */
-    private static void applyHealth(Mob mob, double multiplier) {
+    private static boolean scale(Mob mob, Holder<Attribute> attribute, double multiplier) {
         if (multiplier == 1.0D) {
-            return;
+            return false;
         }
 
-        AttributeInstance healthAttribute = mob.getAttribute(Attributes.MAX_HEALTH);
-        if (healthAttribute == null) {
-            return;
+        AttributeInstance instance = mob.getAttribute(attribute);
+        if (instance == null) {
+            return false;
         }
 
-        double previous = healthAttribute.getBaseValue();
-        healthAttribute.setBaseValue(previous * multiplier);
+        double previous = instance.getBaseValue();
+        double requested = previous * multiplier;
+        double applied = attribute.value().sanitizeValue(requested);
+        instance.setBaseValue(applied);
 
-        // setBaseValue ne soigne pas le mob : sans cela il apparaitrait blesse.
-        mob.setHealth(mob.getMaxHealth());
-
-        MobHealthModifier.LOGGER.debug(
-                "Sante de {} : {} -> {}", mob.getType(), previous, healthAttribute.getBaseValue());
-    }
-
-    /**
-     * Applique le multiplicateur de degats d'attaque.
-     *
-     * @param mob mob a modifier
-     * @param multiplier facteur applique a la valeur de base de {@code ATTACK_DAMAGE}
-     */
-    private static void applyDamage(Mob mob, double multiplier) {
-        if (multiplier == 1.0D) {
-            return;
+        if (applied < requested) {
+            MobHealthModifier.LOGGER.debug(
+                    "{} : {} demande {} mais le jeu plafonne a {}",
+                    mob.getType(), attribute.value().getDescriptionId(), requested, applied);
+        } else {
+            MobHealthModifier.LOGGER.debug(
+                    "{} : {} passe de {} a {}",
+                    mob.getType(), attribute.value().getDescriptionId(), previous, applied);
         }
 
-        AttributeInstance damageAttribute = mob.getAttribute(Attributes.ATTACK_DAMAGE);
-        if (damageAttribute == null) {
-            return;
-        }
-
-        double previous = damageAttribute.getBaseValue();
-        damageAttribute.setBaseValue(previous * multiplier);
-
-        MobHealthModifier.LOGGER.debug(
-                "Degats de {} : {} -> {}", mob.getType(), previous, damageAttribute.getBaseValue());
+        return true;
     }
 }

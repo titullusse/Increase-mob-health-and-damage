@@ -16,8 +16,21 @@ public final class MobHealthModifierConfig {
     /** Valeur la plus basse acceptee pour un multiplicateur. */
     public static final double MIN_MULTIPLIER = 0.1D;
 
-    /** Valeur la plus haute acceptee pour un multiplicateur. */
-    public static final double MAX_MULTIPLIER = 10.0D;
+    /**
+     * Plafond des multiplicateurs, si haut qu'il ne peut jamais etre atteint utilement.
+     *
+     * <p>La vraie limite ne vient pas d'ici mais du jeu lui-meme : chaque attribut vanilla declare
+     * son intervalle, {@code MAX_HEALTH} s'arretant a 1024 points de vie et {@code ATTACK_DAMAGE} a
+     * 2048 degats. Au-dela, Minecraft ramene la valeur a cette borne. Le multiplicateur le plus
+     * eleve ayant encore un effet est donc de l'ordre de quelques milliers, dans le cas extreme d'un
+     * mob partant d'une valeur inferieure a 1 ; pour un zombie et ses 20 points de vie, tout ce qui
+     * depasse 51 revient au meme.
+     *
+     * <p>{@link Double#MAX_VALUE} conviendrait tout autant, mais NeoForge ne sait ecrire une borne
+     * ouverte que pour les entiers : le fichier afficherait alors {@code Range: 0.1 ~
+     * 1.7976931348623157E308}. Une valeur ronde reste lisible sans rien restreindre.
+     */
+    public static final double MAX_MULTIPLIER = 1_000_000.0D;
 
     /** Ciblage utilise tant que la configuration n'est pas chargee. */
     public static final MobTarget DEFAULT_TARGET = MobTarget.HOSTILE;
@@ -50,7 +63,9 @@ public final class MobHealthModifierConfig {
             healthMultiplier = builder
                     .comment(
                             "Multiplicateur applique a la sante maximale.",
-                            "1.0 = normal | 2.0 = double | 0.5 = moitie")
+                            "1.0 = normal | 2.0 = double | 0.5 = moitie",
+                            "Aucun plafond ici, mais Minecraft limite la sante a 1024 points :",
+                            "au-dela le mob restera a 1024 (soit x51 environ pour un zombie).")
                     .defineInRange("healthMultiplier", 1.0D, MIN_MULTIPLIER, MAX_MULTIPLIER);
 
             enableDamageModification = builder
@@ -60,7 +75,8 @@ public final class MobHealthModifierConfig {
             damageMultiplier = builder
                     .comment(
                             "Multiplicateur applique aux degats d'attaque.",
-                            "1.0 = normal | 2.0 = double | 0.5 = moitie")
+                            "1.0 = normal | 2.0 = double | 0.5 = moitie",
+                            "Aucun plafond ici, mais Minecraft limite les degats a 2048.")
                     .defineInRange("damageMultiplier", 1.0D, MIN_MULTIPLIER, MAX_MULTIPLIER);
 
             builder.pop();
@@ -113,7 +129,7 @@ public final class MobHealthModifierConfig {
     }
 
     /**
-     * @return le multiplicateur de sante, entre {@value #MIN_MULTIPLIER} et {@value #MAX_MULTIPLIER}
+     * @return le multiplicateur de sante, au minimum {@value #MIN_MULTIPLIER}
      */
     public static double getHealthMultiplier() {
         return isLoaded() ? COMMON.healthMultiplier.get() : 1.0D;
@@ -127,7 +143,7 @@ public final class MobHealthModifierConfig {
     }
 
     /**
-     * @return le multiplicateur de degats, entre {@value #MIN_MULTIPLIER} et {@value #MAX_MULTIPLIER}
+     * @return le multiplicateur de degats, au minimum {@value #MIN_MULTIPLIER}
      */
     public static double getDamageMultiplier() {
         return isLoaded() ? COMMON.damageMultiplier.get() : 1.0D;

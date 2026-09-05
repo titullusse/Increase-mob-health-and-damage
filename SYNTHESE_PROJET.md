@@ -74,7 +74,8 @@ public static void register(ModContainer container) {
 
 Rôles :
 - décrire la structure du fichier `config/mobhealthmodifier-common.toml` ;
-- déclarer les bornes (`defineInRange`, 0.1 – 10.0) que NeoForge applique lui-même ;
+- déclarer les bornes (`defineInRange`) que NeoForge applique lui-même — le plafond est fixé si haut
+  (10⁶) qu'il n'est jamais atteint, la vraie limite venant des attributs vanilla ;
 - exposer des getters qui vérifient `isLoaded()` avant de lire, afin de renvoyer une valeur neutre
   plutôt que de lever une exception si un évènement arrive avant le chargement du fichier.
 
@@ -251,9 +252,9 @@ Deux fichiers, deux portées.
 [general]
 	affectedMobs = "HOSTILE"      # ALL | HOSTILE | PASSIVE
 	enableHealthModification = true
-	healthMultiplier = 1.0        # 0.1 – 10.0
+	healthMultiplier = 1.0        # 0.1 – 1000000.0
 	enableDamageModification = true
-	damageMultiplier = 1.0        # 0.1 – 10.0
+	damageMultiplier = 1.0        # 0.1 – 1000000.0
 ```
 
 `config/mobhealthmodifier-client.toml` — préférences du joueur
@@ -305,8 +306,8 @@ Deux fichiers, deux portées.
       └─ applyModifications(mob)
 
 4. MODIFICATION
-   MAX_HEALTH    : base ×= healthMultiplier, puis setHealth(getMaxHealth())
-   ATTACK_DAMAGE : base ×= damageMultiplier  (ignoré si l'attribut est absent)
+   MAX_HEALTH    : base ×= healthMultiplier, plafonné à 1024, puis setHealth(getMaxHealth())
+   ATTACK_DAMAGE : base ×= damageMultiplier, plafonné à 2048 (ignoré si l'attribut est absent)
 
 5. CONNEXION D'UN CLIENT
    NeoForge envoie mobhealthmodifier-server.toml au client
@@ -322,6 +323,26 @@ Deux fichiers, deux portées.
 
 `setBaseValue` ne soigne pas l'entité : sans le `setHealth` qui suit, un zombie passé de 20 à 40 HP
 apparaîtrait à moitié blessé.
+
+### Le plafond vient du jeu, pas du mod
+
+Chaque attribut vanilla est un `RangedAttribute` qui déclare son propre intervalle :
+`MAX_HEALTH` va de 1 à **1024**, `ATTACK_DAMAGE` de 0 à **2048**. `AttributeInstance#getValue`
+termine son calcul par `attribute.value().sanitizeValue(...)`, qui applique un `Mth.clamp` — la
+valeur effective ne peut donc pas sortir de l'intervalle, quoi qu'on écrive.
+
+`setBaseValue`, en revanche, ne clampe pas : la valeur *stockée* pourrait rester à 200 000 alors que
+le jeu en utilise 1024. Le mod appelle donc `sanitizeValue` lui-même avant d'écrire, pour que les
+données de l'entité correspondent à la réalité :
+
+```java
+double requested = previous * multiplier;
+double applied = attribute.value().sanitizeValue(requested);
+instance.setBaseValue(applied);
+```
+
+C'est aussi pourquoi le plafond de configuration n'a pas besoin d'exister : au-delà de ~51× pour un
+zombie, tout multiplicateur donne le même résultat.
 
 ---
 

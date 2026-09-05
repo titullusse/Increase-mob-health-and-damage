@@ -88,7 +88,9 @@ qui impose cet emplacement : une config `SERVER` est propre à chaque monde.
 
 	# Multiplicateur applique a la sante maximale.
 	# 1.0 = normal | 2.0 = double | 0.5 = moitie
-	# Range: 0.1 ~ 10.0
+	# Aucun plafond ici, mais Minecraft limite la sante a 1024 points :
+	# au-dela le mob restera a 1024 (soit x51 environ pour un zombie).
+	# Range: 0.1 ~ 1000000.0
 	healthMultiplier = 1.0
 
 	# Active la modification des degats d'attaque des mobs.
@@ -96,7 +98,8 @@ qui impose cet emplacement : une config `SERVER` est propre à chaque monde.
 
 	# Multiplicateur applique aux degats d'attaque.
 	# 1.0 = normal | 2.0 = double | 0.5 = moitie
-	# Range: 0.1 ~ 10.0
+	# Aucun plafond ici, mais Minecraft limite les degats a 2048.
+	# Range: 0.1 ~ 1000000.0
 	damageMultiplier = 1.0
 ```
 
@@ -130,8 +133,34 @@ réexaminés si vous changez `affectedMobs` plus tard.
 | Difficile | 2.0 | 2.0 |
 | Hardcore | 3.0 | 3.0 |
 
-Les bornes 0.1 – 10.0 sont appliquées par NeoForge : une valeur hors intervalle est refusée et
-remplacée par la valeur par défaut, avec un avertissement dans les logs.
+### Jusqu'où peut-on monter ?
+
+Il n'y a plus de plafond côté mod : `healthMultiplier = 500.0` est accepté. Mais **Minecraft borne
+lui-même ses attributs**, et c'est là que la limite réelle se trouve :
+
+| Attribut | Plafond du jeu |
+|----------|----------------|
+| Santé maximale | **1024** points de vie |
+| Dégâts d'attaque | **2048** |
+
+Ces bornes sont déclarées par Minecraft (`RangedAttribute`) et appliquées avant que la valeur ne
+serve. Aucun mod ne peut les dépasser sans réécrire l'attribut lui-même.
+
+Conséquence concrète : le multiplicateur utile dépend de la valeur de départ du mob.
+
+| Mob | Santé de base | Multiplicateur au-delà duquel plus rien ne change |
+|-----|---------------|--------------------------------------------------|
+| Zombie, creeper, squelette | 20 | × 51.2 |
+| Enderman | 40 | × 25.6 |
+| Ravageur | 100 | × 10.24 |
+| Warden | 500 | × 2.05 |
+
+Autrement dit, `healthMultiplier = 1000.0` sur un zombie donne exactement le même résultat que
+`51.2` : 1024 points de vie. Le mod écrit d'ailleurs directement la valeur plafonnée, pour que les
+données de l'entité correspondent à ce que le jeu utilise réellement.
+
+Le minimum reste `0.1`. Une valeur hors intervalle est refusée par NeoForge et remplacée par le
+défaut, avec un avertissement dans les logs.
 
 ### Exemple de résultat
 
@@ -356,6 +385,8 @@ src/main/resources/
 - Pas de commande in-game ni de GUI.
 - Le ciblage se fait par catégorie (hostiles / passifs / tous), pas par type précis : impossible de
   donner un multiplicateur différent aux zombies et aux creepers.
+- La santé ne peut pas dépasser 1024 ni les dégâts 2048 : ce sont les bornes de Minecraft, pas
+  celles du mod.
 - `ATTACK_DAMAGE` n'existe pas sur tous les mobs. Les creepers (explosion) et les mobs à distance
   (squelette, blaze) infligent des dégâts par un autre biais et ne sont pas affectés côté dégâts.
 - Les barres de vie exigent le mod côté client ; installé sur le serveur seul, il ne fait que

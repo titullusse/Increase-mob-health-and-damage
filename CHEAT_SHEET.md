@@ -61,12 +61,15 @@ src/main/resources/
 [general]
 	affectedMobs = "HOSTILE"   # ALL | HOSTILE | PASSIVE
 	enableHealthModification = true
-	healthMultiplier = 1.0     # 0.1 – 10.0
+	healthMultiplier = 1.0     # 0.1 – 1000000.0 (sans plafond utile)
 	enableDamageModification = true
-	damageMultiplier = 1.0     # 0.1 – 10.0
+	damageMultiplier = 1.0     # 0.1 – 1000000.0
 ```
 
 Presets : facile `0.5/0.5` · normal `1.0/1.0` · difficile `2.0/2.0` · hardcore `3.0/3.0`
+
+⚠️ Plafonds **du jeu**, pas du mod : `MAX_HEALTH` = 1024, `ATTACK_DAMAGE` = 2048.
+Un zombie (20 PV) sature donc à ×51.2 ; au-delà le multiplicateur ne change plus rien.
 
 Hostile = `mob instanceof Enemy || getType().getCategory() == MobCategory.MONSTER`
 
@@ -267,6 +270,7 @@ if (speed != null) {
 - Redémarrage requis après édition du TOML
 - Pas de commande ni de GUI
 - Ciblage par catégorie uniquement, pas par type précis de mob
+- Santé plafonnée à 1024 et dégâts à 2048 par Minecraft lui-même
 - Barres de vie = côté client obligatoire (le serveur seul ne suffit pas)
 - Barres occultées par les blocs, sans valeur chiffrée
 - Config SERVER par monde : le fichier vit dans `<monde>/serverconfig/`, pas dans `config/`
